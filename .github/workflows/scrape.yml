@@ -1,11 +1,12 @@
 name: GLIDA Charger Live Data Collector
 
 on:
-  workflow_dispatch:  # Allows manual triggering from GitHub UI
+  workflow_dispatch:
 
 jobs:
   scrape-job:
     runs-on: ubuntu-latest
+    timeout-minutes: 90  # Prevents GitHub from prematurely stopping a 60-min loop
 
     steps:
       - name: Checkout Repository
@@ -14,22 +15,27 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: Install Dependencies & Playwright Browsers
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          playwright install chromium --with-deps
+          pip install playwright pandas
 
-      - name: Run 1-Hour Collector Script
+      - name: Install Playwright Browsers & System Dependencies
+        run: |
+          npx playwright install-deps
+          playwright install chromium
+
+      - name: Run Scraper Script
         run: python scraper.py
 
       - name: Commit and Push Updated CSV
+        if: always()  # Saves CSV even if script ends early
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add glida_charging_data.csv
+          git add glida_charging_data.csv || true
           git commit -m "Update GLIDA charging availability data" || echo "No changes to commit"
           git push
         env:
