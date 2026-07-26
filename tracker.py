@@ -17,16 +17,18 @@ def init_csv():
 def run_single_tracker():
     init_csv()
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] Running single-instance tracker on Google Maps...")
+    print(f"[{timestamp}] Running tracker...")
 
     with sync_playwright() as p:
-        # Launch non-headless so you can observe the browser action
+        # Crucial flags for GitHub Actions headless environment
         browser = p.chromium.launch(
-            headless=False,
+            headless=True,
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-blink-features=AutomationControlled"
             ]
         )
         
@@ -38,28 +40,20 @@ def run_single_tracker():
 
         try:
             print("Navigating to URL...")
-            page.goto(URL, wait_until="networkidle", timeout=60000)
+            page.goto(URL, wait_until="domcontentloaded", timeout=60000)
             
-            # Dismiss cookies/consent banner if it pops up
+            # Auto-accept cookies if prompted
             try:
                 consent_btn = page.query_selector("button[aria-label*='Accept'], button[aria-label*='Agree']")
                 if consent_btn:
-                    print("Dismissing consent dialog...")
                     consent_btn.click()
                     page.wait_for_timeout(2000)
             except Exception:
                 pass
 
-            # Wait for content rendering
             page.wait_for_timeout(5000)
 
-            # Save screenshot for debugging visual state
-            page.screenshot(path="debug_screenshot.png")
-            print("Saved page screenshot to 'debug_screenshot.png'")
-
             text = page.inner_text("body")
-
-            # Updated flexible regex for EV connectors
             pattern = r"(CCS2?|Type\s*2|GB/T|CHAdeMO)[^\d]*([\d\.]+\s*kW)?.*?(\d+)\s*(?:/|of)\s*(\d+)"
             matches = re.findall(pattern, text, re.IGNORECASE)
 
@@ -70,22 +64,16 @@ def run_single_tracker():
                 scraped_rows.append([timestamp, conn_type.strip(), power_str, available, total])
 
             if scraped_rows:
-                print(f"\n[SUCCESS] Found {len(scraped_rows)} connector entry/entries:")
-                for row in scraped_rows:
-                    print(f"  -> Type: {row[1]} | Power: {row[2]} | Available: {row[3]}/{row[4]}")
-
+                print(f"[SUCCESS] Scraped {len(scraped_rows)} entries.")
                 with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f)
                     writer.writerows(scraped_rows)
-                print(f"Appended results to '{CSV_FILE}'.")
             else:
-                print("\n[WARNING] No connector patterns matched standard criteria.")
-                print("Showing sample extracted text from page body for inspection:\n")
-                lines = [line.strip() for line in text.split("\n") if line.strip()]
-                print("\n".join(lines[:25]))
+                print("[WARNING] No connectors matched pattern.")
 
         except Exception as e:
-            print(f"[ERROR] Tracker failed: {e}")
+            print(f"[ERROR] Run failed: {e}")
+            raise e  # Throw error to raise visible exit code if needed
         finally:
             browser.close()
 
